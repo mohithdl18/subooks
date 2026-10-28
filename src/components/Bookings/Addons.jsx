@@ -1,8 +1,12 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Details from "./Details";
+import {
+  updateBookingMeals,
+  updateBookingDrivers,
+} from "@/logic/Data";
 
 const ADDON_PRICES = {
   lunch: 550,
@@ -83,7 +87,10 @@ export default function Addons({
   }
 
   const guestCount = Math.max(1, Number(addons.mealGuests) || 1);
-  const driverCount = Math.max(0, Number(addons.drivers) || 0);
+  const driverCount = Math.min(
+    4,
+    Math.max(0, Number(addons.drivers) || 0)
+  );
 
   const selectedMeal = MEAL_OPTIONS.find(
     (option) => option.id === addons.mealPlan
@@ -107,9 +114,28 @@ export default function Addons({
   const totalAddons =
     mealTotal + driverAccommodationTotal + driverMealTotal;
 
+  // Keep add-on selections synchronized with the shared booking data.
+  useEffect(() => {
+    updateBookingMeals({
+      mealPlan: addons.mealPlan,
+      mealGuests: guestCount,
+    });
+
+    updateBookingDrivers({
+      drivers: driverCount,
+      driverMealPlan: driverCount > 0 ? addons.driverMealPlan : "",
+    });
+  }, [
+    addons.mealPlan,
+    guestCount,
+    driverCount,
+    addons.driverMealPlan,
+  ]);
+
   function handleAddonsNext() {
     const addonsData = {
       ...addons,
+      drivers: driverCount,
       totalAddons,
       nights: stayNights,
     };
@@ -129,6 +155,7 @@ export default function Addons({
     onNext?.({
       addons: selectedAddons || {
         ...addons,
+        drivers: driverCount,
         totalAddons,
         nights: stayNights,
       },
@@ -253,7 +280,7 @@ export default function Addons({
               value={driverCount}
               onChange={(count) =>
                 update({
-                  drivers: count,
+                  drivers: Math.min(4, count),
                   driverMealPlan:
                     count === 0 ? "" : addons.driverMealPlan,
                 })

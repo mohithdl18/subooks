@@ -4,6 +4,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 const TEMP_ID_KEY = "suvilla_temp_booking_id";
+const HOLD_EXPIRY_KEY = "suvilla_temp_booking_expiry";
+export const TEMP_HOLD_DURATION_MS = 10 * 60 * 1000;
 
 function generateId(prefix) {
   const timestamp = Date.now().toString(36).toUpperCase();
@@ -21,6 +23,9 @@ function createInitialData() {
     CheckIN: "",
     CheckOUT: "",
     Nights: 0,
+
+    // Temporary room-hold information
+    HoldExpiresAt: null,
 
     Guests: {
       TotalAdults: 0,
@@ -92,6 +97,26 @@ function updateBookingData(patch) {
   return bookingData;
 }
 
+function getStoredValue(key) {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredValue(key, value) {
+  try {
+    if (value == null) {
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, String(value));
+    }
+  } catch {
+    // Session storage may be unavailable.
+  }
+}
+
 /**
  * Creates or retrieves the temporary booking ID.
  * Call when the booking experience first loads.
@@ -101,29 +126,80 @@ export function initializeTempID() {
     return bookingData.TempID;
   }
 
-  let tempID = null;
-
-  try {
-    tempID = window.sessionStorage.getItem(TEMP_ID_KEY);
-  } catch {
-    // Continue with an in-memory ID if storage is unavailable.
-  }
+  let tempID = getStoredValue(TEMP_ID_KEY);
 
   if (!tempID) {
     tempID = generateId("TMP");
-
-    try {
-      window.sessionStorage.setItem(TEMP_ID_KEY, tempID);
-    } catch {
-      // The ID will remain available in memory for this page session.
-    }
+    setStoredValue(TEMP_ID_KEY, tempID);
   }
 
   updateBookingData({
     TempID: tempID,
   });
 
+  // Restore the expiry timestamp after a page refresh.
+  const storedExpiry = getStoredValue(HOLD_EXPIRY_KEY);
+  const expiry = storedExpiry ? Number(storedExpiry) : null;
+
+  if (expiry && Number.isFinite(expiry) && expiry > Date.now()) {
+    updateBookingData({
+      HoldExpiresAt: expiry,
+    });
+  } else if (expiry) {
+    clearHoldExpiry();
+  }
+
   return tempID;
+}
+
+/**
+ * Start or update the local countdown expiry.
+ * Call after the backend successfully creates a temporary hold.
+ *
+ * Pass the expiresAt value returned by the backend when possible.
+ */
+export function startTemporaryHold(expiresAt = null) {
+  const expiry =
+    expiresAt != null
+      ? new Date(expiresAt).getTime()
+      : Date.now() + TEMP_HOLD_DURATION_MS;
+
+  if (!Number.isFinite(expiry) || expiry <= Date.now()) {
+    clearHoldExpiry();
+    return null;
+  }
+
+  setStoredValue(HOLD_EXPIRY_KEY, expiry);
+
+  updateBookingData({
+    HoldExpiresAt: expiry,
+  });
+
+  return expiry;
+}
+
+/**
+ * Clear the local hold countdown.
+ * This does not release holds in MongoDB.
+ * Use the temporary-hold API for server-side release.
+ */
+export function clearHoldExpiry() {
+  setStoredValue(HOLD_EXPIRY_KEY, null);
+
+  updateBookingData({
+    HoldExpiresAt: null,
+  });
+}
+
+/**
+ * Returns remaining hold time in milliseconds.
+ */
+export function getHoldTimeRemaining() {
+  if (!bookingData.HoldExpiresAt) {
+    return 0;
+  }
+
+  return Math.max(0, bookingData.HoldExpiresAt - Date.now());
 }
 
 /**
@@ -248,8 +324,7 @@ export function updateBookingInformation(details = {}) {
     Information: {
       Name: details.name ?? bookingData.Information.Name,
       Email: details.email ?? bookingData.Information.Email,
-      PhoneNumber:
-        details.phone ?? bookingData.Information.PhoneNumber,
+      PhoneNumber: details.phone ?? bookingData.Information.PhoneNumber,
       Address: details.address ?? bookingData.Information.Address,
       City: details.city ?? bookingData.Information.City,
       PinCode: details.pincode ?? bookingData.Information.PinCode,
@@ -278,8 +353,7 @@ export function updateBookingRecord(patch) {
 }
 
 /**
- * Call this ONLY after the booking/payment has been confirmed successfully.
- * Pass the confirmed ID from your backend when available.
+ * Call ONLY after the booking/payment has been confirmed successfully.
  */
 export function finalizeBooking(confirmedBookingID = null) {
   if (bookingData.BookingStatus === "confirmed" && bookingData.BookingID) {
@@ -291,6 +365,7 @@ export function finalizeBooking(confirmedBookingID = null) {
   return updateBookingData({
     BookingID: bookingID,
     BookingStatus: "confirmed",
+    HoldExpiresAt: null,
   });
 }
 
@@ -313,15 +388,13 @@ export function useBookingData() {
 
 /**
  * Clear the current booking and start a fresh temporary session.
+ * This only resets local state; release server-side holds separately.
  */
 export function resetBookingData() {
   bookingData = createInitialData();
 
-  try {
-    window.sessionStorage.removeItem(TEMP_ID_KEY);
-  } catch {
-    // Storage may be unavailable.
-  }
+  setStoredValue(TEMP_ID_KEY, null);
+  setStoredValue(HOLD_EXPIRY_KEY, null);
 
   initializeTempID();
   notifyListeners();

@@ -10,6 +10,7 @@ import {
 } from "@/logic/price";
 import Modal from "@/components/Bookings/Modal";
 import Addons from "@/components/Bookings/Addons";
+import Checkout from "@/components/Bookings/Checkout";
 
 export default function Cart({
   selectedRoomIds = [],
@@ -29,8 +30,10 @@ export default function Cart({
     driverMealPlan: "",
   });
 
+  const [customerDetails, setCustomerDetails] = useState({});
+  const [paymentMessage, setPaymentMessage] = useState("");
+
   // Prefer the latest selected room objects from RoomsCard.
-  // These contain extra guests, base price, nights, and updated total.
   const selectedRooms = selectedRoomData.filter((room) =>
     selectedRoomIds.includes(room.id)
   );
@@ -44,16 +47,20 @@ export default function Cart({
   const itemCount = selectedRooms.length + selectedPackages.length;
   const stayNights = Math.max(1, Number(nights) || 1);
 
-  function handleClear() {
-    onClear?.();
-
+  function resetAddons() {
     setAddons({
       mealPlan: "",
       mealGuests: 2,
       drivers: 0,
       driverMealPlan: "",
     });
+  }
 
+  function handleClear() {
+    onClear?.();
+    resetAddons();
+    setCustomerDetails({});
+    setPaymentMessage("");
     setStep("cart");
   }
 
@@ -62,16 +69,41 @@ export default function Cart({
     setStep("cart");
   }
 
-  function handleAddonsNext(selection) {
-    setAddons({
-      mealPlan: selection.mealPlan,
-      mealGuests: selection.mealGuests,
-      drivers: selection.drivers,
-      driverMealPlan: selection.driverMealPlan,
-    });
+  function handleAddonsNext(result) {
+    // Addons passes { addons, details } after Details.jsx is completed.
+    const nextAddons = result?.addons ?? addons;
+    const nextDetails = result?.details ?? {};
 
-    setStep("next");
+    setAddons(nextAddons);
+    setCustomerDetails(nextDetails);
+    setPaymentMessage("");
+    setStep("checkout");
   }
+
+  function handleDetailsNext(details) {
+    setCustomerDetails(details);
+    setPaymentMessage("");
+    setStep("checkout");
+  }
+
+  function handlePay(paymentData) {
+    // This prepares the checkout data only.
+    // Connect Razorpay before processing a real payment.
+    setPaymentMessage(
+      "Your booking total is ready. Payment processing will be available once the payment gateway is connected."
+    );
+
+    console.log("Checkout summary:", paymentData);
+  }
+
+  const modalTitle =
+    step === "cart"
+      ? "Your Cart"
+      : step === "addons"
+        ? "Add-ons"
+        : step === "details"
+          ? "Your Details"
+          : "Checkout";
 
   return (
     <>
@@ -112,14 +144,9 @@ export default function Cart({
       <Modal
         isOpen={isOpen}
         onClose={handleClose}
-        title={
-          step === "cart"
-            ? "Your Cart"
-            : step === "addons"
-              ? "Add-ons"
-              : "Continue Your Booking"
-        }
+        title={modalTitle}
       >
+        {/* CART */}
         {step === "cart" && (
           <>
             <div className="mb-5 flex items-center justify-between gap-3">
@@ -161,22 +188,22 @@ export default function Cart({
                 {selectedRooms.map((room) => {
                   const basePrice = Number(
                     room.basePrice ??
-                    room.price ??
-                    PRICING.accommodation.weekday
+                      room.price ??
+                      PRICING.accommodation.weekday
                   );
 
                   const extraAdults = Number(room.extraAdults) || 0;
                   const extraChildren = Number(room.extraChildren) || 0;
+
                   const roomNights = Math.max(
                     1,
                     Number(room.nights ?? stayNights) || 1
                   );
 
-                  // Use the selected total when available.
-                  // Otherwise calculate using shared pricing rules.
                   const roomTotal =
-                    Number.isFinite(Number(room.totalPrice)) &&
-                    room.totalPrice !== undefined
+                    room.totalPrice !== undefined &&
+                    room.totalPrice !== null &&
+                    Number.isFinite(Number(room.totalPrice))
                       ? Number(room.totalPrice)
                       : calculateRoomPrice({
                           basePrice,
@@ -302,6 +329,7 @@ export default function Cart({
           </>
         )}
 
+        {/* ADD-ONS AND DETAILS */}
         {step === "addons" && (
           <Addons
             nights={stayNights}
@@ -309,40 +337,22 @@ export default function Cart({
             onChange={setAddons}
             onBack={() => setStep("cart")}
             onNext={handleAddonsNext}
+            initialDetails={customerDetails}
           />
         )}
 
-        {step === "next" && (
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-[#052a50]/10 bg-white p-5">
-              <h3 className="font-semibold text-[#052a50]">
-                Add-ons saved for this session
-              </h3>
-
-              <p className="mt-2 text-sm leading-6 text-[#052a50]/65">
-                Your selected meal plan, guest count, and driver options are
-                ready for the next booking step.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setStep("addons")}
-                className="flex-1 rounded-xl border border-[#052a50]/20 bg-white px-4 py-3.5 text-sm font-semibold text-[#052a50] transition hover:bg-[#052a50]/5"
-              >
-                Back
-              </button>
-
-              <button
-                type="button"
-                onClick={handleClose}
-                className="flex-1 rounded-xl bg-[#052a50] px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-[#e4b441] hover:text-[#052a50]"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+        {/* CHECKOUT */}
+        {step === "checkout" && (
+          <Checkout
+            rooms={selectedRooms}
+            packages={selectedPackages}
+            addons={addons}
+            details={customerDetails}
+            nights={stayNights}
+            onBack={() => setStep("addons")}
+            onPay={handlePay}
+            paymentMessage={paymentMessage}
+          />
         )}
       </Modal>
     </>

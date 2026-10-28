@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+import { updateBookingInformation } from "@/logic/Data";
 
 const COLORS = {
   background: "#F7FAEE",
@@ -60,7 +61,7 @@ export default function Details({
   const [formData, setFormData] = useState({
     name: initialDetails.name || "",
     email: initialDetails.email || "",
-    phone: (initialDetails.phone || "").replace(/^\+91/, "").slice(0, 10),
+    phone: (initialDetails.phone || "").replace(/^\+?91/, "").slice(0, 10),
     address: initialDetails.address || "",
     city: initialDetails.city || "",
     pincode: initialDetails.pincode || "",
@@ -140,7 +141,7 @@ export default function Details({
   function handleNext() {
     if (!validateForm()) return;
 
-    onNext?.({
+    const details = {
       ...formData,
       name: formData.name.trim(),
       email: formData.email.trim(),
@@ -150,7 +151,13 @@ export default function Details({
       pincode: formData.pincode,
       aadharNumber: formData.aadharNumber,
       specialRequests: formData.specialRequests.trim(),
-    });
+    };
+
+    // Save the validated customer information to shared booking data.
+    updateBookingInformation(details);
+
+    // Pass the same information to the next booking step.
+    onNext?.(details);
   }
 
   return (

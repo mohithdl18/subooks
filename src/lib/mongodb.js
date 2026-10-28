@@ -10,20 +10,17 @@ if (!uri) {
 
 const options = {};
 
+const globalMongo = globalThis;
+
 let client;
 let clientPromise;
 
-if (process.env.NODE_ENV === "development") {
-  if (!global._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    global._mongoClientPromise = client.connect();
-  }
-
-  clientPromise = global._mongoClientPromise;
-} else {
+if (!globalMongo._mongoClientPromise) {
   client = new MongoClient(uri, options);
-  clientPromise = client.connect();
+  globalMongo._mongoClientPromise = client.connect();
 }
+
+clientPromise = globalMongo._mongoClientPromise;
 
 // Collection definitions
 const collectionDefinitions = [
@@ -36,12 +33,31 @@ const collectionDefinitions = [
         properties: {
           date: {
             bsonType: "string",
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
             description: "Date in YYYY-MM-DD format",
           },
           booked_rooms: {
             bsonType: "array",
             items: {
               bsonType: "string",
+            },
+          },
+          blocked_rooms: {
+            bsonType: "array",
+            items: {
+              bsonType: "string",
+            },
+          },
+          temporary_holds: {
+            bsonType: "array",
+            items: {
+              bsonType: "object",
+              required: ["TempID", "roomId", "expiresAt"],
+              properties: {
+                TempID: { bsonType: "string" },
+                roomId: { bsonType: "string" },
+                expiresAt: { bsonType: "date" },
+              },
             },
           },
         },
@@ -63,9 +79,7 @@ const collectionDefinitions = [
           "status",
         ],
         properties: {
-          booking_id: {
-            bsonType: "string",
-          },
+          booking_id: { bsonType: "string" },
           personal_info: {
             bsonType: "object",
             required: [
@@ -97,12 +111,8 @@ const collectionDefinitions = [
             bsonType: "object",
             required: ["accommodation", "dinner"],
             properties: {
-              accommodation: {
-                enum: ["yes", "no"],
-              },
-              dinner: {
-                enum: ["yes", "no"],
-              },
+              accommodation: { enum: ["yes", "no"] },
+              dinner: { enum: ["yes", "no"] },
             },
           },
           terms_conditions: {
@@ -139,14 +149,14 @@ async function ensureCollections(db) {
       continue;
     }
 
-    const options = definition.validator
+    const collectionOptions = definition.validator
       ? { validator: definition.validator }
       : {};
 
     try {
-      await db.createCollection(definition.name, options);
+      await db.createCollection(definition.name, collectionOptions);
     } catch (error) {
-      // Ignore namespace-exists errors from concurrent initialization.
+      // Another request may have created the collection concurrently.
       if (error.code !== 48) {
         throw error;
       }
@@ -154,15 +164,14 @@ async function ensureCollections(db) {
   }
 }
 
-// Get the database and ensure all three collections exist.
+// Get the database and ensure required collections exist.
 export async function getDb() {
-  const client = await clientPromise;
-  const db = client.db(dbName);
+  const connectedClient = await clientPromise;
+  const db = connectedClient.db(dbName);
 
   await ensureCollections(db);
 
   return db;
 }
 
-// Reusable MongoDB client connection.
 export { clientPromise };
