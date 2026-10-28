@@ -248,7 +248,7 @@ export default function BookingsPage() {
 
         setAvailabilityError(
           error.message ||
-            "Unable to check availability. Please try again."
+          "Unable to check availability. Please try again."
         );
       } finally {
         if (requestId === requestIdRef.current) {
@@ -478,7 +478,7 @@ export default function BookingsPage() {
       if (!response.ok || !result.success) {
         throw new Error(
           result.message ||
-            "Unable to reserve this room temporarily."
+          "Unable to reserve this room temporarily."
         );
       }
 
@@ -534,7 +534,7 @@ export default function BookingsPage() {
       if (isMountedRef.current) {
         setHoldError(
           error.message ||
-            "Unable to hold this room. Please try again."
+          "Unable to hold this room. Please try again."
         );
       }
     } finally {
@@ -885,6 +885,7 @@ export default function BookingsPage() {
         </section>
       </div>
 
+
       <Cart
         selectedRoomIds={selectedRoomIds}
         selectedRoomData={selectedRoomData}
@@ -892,7 +893,11 @@ export default function BookingsPage() {
         availableRoomIds={availableRoomIds}
         nights={nights}
         onClear={handleClearCart}
+        tempID={tempIDRef.current || ""}
+        checkIn={dates.checkIn}
+        checkOut={dates.checkOut}
       />
+
     </main>
   );
 }
