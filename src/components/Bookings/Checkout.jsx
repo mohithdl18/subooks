@@ -76,6 +76,10 @@ export default function Checkout({
   const [promoError, setPromoError] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
+  const [isPaying, setIsPaying] = useState(false);
+  const [localPaymentMessage, setLocalPaymentMessage] = useState("");
+  const [paymentError, setPaymentError] = useState(false);
+
   const stayNights = Math.max(1, Number(nights) || 1);
 
   const guestCount = Math.max(
@@ -105,7 +109,8 @@ export default function Checkout({
           0,
           Number(
             room.totalPrice ??
-              getRoomPrice(room) * Math.max(1, Number(room.nights) || stayNights)
+              getRoomPrice(room) *
+                Math.max(1, Number(room.nights) || stayNights)
           ) || 0
         );
 
@@ -125,10 +130,7 @@ export default function Checkout({
       packages.map((pkg) => {
         const total = Math.max(
           0,
-          Number(
-            pkg.totalPrice ??
-              getPackagePrice(pkg) * stayNights
-          ) || 0
+          Number(pkg.totalPrice ?? getPackagePrice(pkg) * stayNights) || 0
         );
 
         return {
@@ -167,8 +169,7 @@ export default function Checkout({
     mealTotal + driverAccommodationTotal + driverMealTotal;
 
   const addonsTotal =
-    addons.totalAddons !== undefined &&
-    addons.totalAddons !== null
+    addons.totalAddons !== undefined && addons.totalAddons !== null
       ? Math.max(0, Number(addons.totalAddons) || 0)
       : calculatedAddonsTotal;
 
@@ -221,6 +222,7 @@ export default function Checkout({
     setAppliedPromo({ code, discount });
     setPromoError(false);
     setPromoMessage(`${discount}% discount applied successfully.`);
+    setLocalPaymentMessage("");
   }
 
   function removePromoCode() {
@@ -228,36 +230,100 @@ export default function Checkout({
     setPromoInput("");
     setPromoMessage("");
     setPromoError(false);
+    setLocalPaymentMessage("");
   }
 
-  function handlePay() {
-    if (!acceptedTerms || itemCount === 0) {
+  async function handlePay() {
+    if (isPaying || !acceptedTerms || itemCount === 0) {
       return;
     }
 
-    onPay?.({
-      customer: details,
-      rooms,
-      packages,
-      addons,
-      promoCode: appliedPromo?.code || null,
-      discountPercentage: appliedPromo?.discount || 0,
-      subtotal,
-      discountAmount,
-      discountedSubtotal,
-      taxRate: TAX_RATE,
-      taxAmount,
-      platformFeeRate: PLATFORM_FEE_RATE,
-      platformFee,
-      totalAmount,
-      nights: stayNights,
-      totalGuests: guestCount,
-      totalRooms: roomCount,
-      totalPackages: packageCount,
-      acceptedTerms: true,
-      acceptedTermsAt: new Date().toISOString(),
-      termsVersion: "1.0",
-    });
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      setPaymentError(true);
+      setLocalPaymentMessage(
+        "The payment amount is invalid. Please review your booking."
+      );
+      return;
+    }
+
+    if (typeof onPay !== "function") {
+      setPaymentError(true);
+      setLocalPaymentMessage(
+        "Payment could not be started. Please try again."
+      );
+      return;
+    }
+
+    setIsPaying(true);
+    setPaymentError(false);
+    setLocalPaymentMessage("Preparing your secure payment...");
+
+    try {
+      const paymentData = {
+        customer: details,
+        rooms,
+        packages,
+        addons,
+
+        promoCode: appliedPromo?.code || null,
+        discountPercentage: appliedPromo?.discount || 0,
+
+        // These values are for the UI summary only.
+        // The server must independently calculate the payable amount.
+        subtotal,
+        discountAmount,
+        discountedSubtotal,
+        taxRate: TAX_RATE,
+        taxAmount,
+        platformFeeRate: PLATFORM_FEE_RATE,
+        platformFee,
+        totalAmount: Number(totalAmount.toFixed(2)),
+
+        nights: stayNights,
+        totalGuests: guestCount,
+        totalRooms: roomCount,
+        totalPackages: packageCount,
+
+        acceptedTerms: true,
+        acceptedTermsAt: new Date().toISOString(),
+        termsVersion: "1.0",
+      };
+
+      const result = await onPay(paymentData);
+
+      if (result?.success === false) {
+        setPaymentError(true);
+        setLocalPaymentMessage(
+          result.message ||
+            "Payment could not be completed. Please try again."
+        );
+        return;
+      }
+
+      if (result?.pending) {
+        setPaymentError(false);
+        setLocalPaymentMessage(
+          result.message ||
+            "Your payment is being verified. Please wait before trying again."
+        );
+        return;
+      }
+
+      setPaymentError(false);
+      setLocalPaymentMessage(
+        result?.message ||
+          "Continue with the secure payment window."
+      );
+    } catch (error) {
+      console.error("Checkout payment error:", error);
+
+      setPaymentError(true);
+      setLocalPaymentMessage(
+        "We couldn't start the payment. If you were already charged, contact us before making another payment."
+      );
+    } finally {
+      setIsPaying(false);
+    }
   }
 
   return (
@@ -297,6 +363,7 @@ export default function Checkout({
               <p className="font-semibold text-green-800">
                 {appliedPromo.code}
               </p>
+
               <p className="text-sm text-green-700">
                 {appliedPromo.discount}% discount applied
               </p>
@@ -305,7 +372,8 @@ export default function Checkout({
             <button
               type="button"
               onClick={removePromoCode}
-              className="rounded-lg border border-green-300 px-3 py-2 text-sm font-semibold text-green-800 transition hover:bg-green-100"
+              disabled={isPaying}
+              className="rounded-lg border border-green-300 px-3 py-2 text-sm font-semibold text-green-800 transition hover:bg-green-100 disabled:opacity-50"
             >
               Remove
             </button>
@@ -325,12 +393,14 @@ export default function Checkout({
               }}
               placeholder="Enter promo code"
               aria-label="Promo code"
-              className="min-w-0 flex-1 rounded-xl border border-[#052a50]/15 bg-[#F7FAEE] px-4 py-3 text-sm uppercase outline-none transition placeholder:normal-case placeholder:text-[#052a50]/40 focus:border-[#e4b441]"
+              disabled={isPaying}
+              className="min-w-0 flex-1 rounded-xl border border-[#052a50]/15 bg-[#F7FAEE] px-4 py-3 text-sm uppercase outline-none transition placeholder:normal-case placeholder:text-[#052a50]/40 focus:border-[#e4b441] disabled:opacity-50"
             />
 
             <button
               type="submit"
-              className="rounded-xl bg-[#052a50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#e4b441] hover:text-[#052a50]"
+              disabled={isPaying}
+              className="rounded-xl bg-[#052a50] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#e4b441] hover:text-[#052a50] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Apply Code
             </button>
@@ -377,11 +447,13 @@ export default function Checkout({
             <p className="mt-1 font-semibold">
               {itemCount} {itemCount === 1 ? "item" : "items"}
             </p>
+
             {roomCount > 0 && (
               <p className="mt-1 text-xs text-[#052a50]/55">
                 {roomCount} {roomCount === 1 ? "room" : "rooms"}
               </p>
             )}
+
             {packageCount > 0 && (
               <p className="mt-1 text-xs text-[#052a50]/55">
                 {packageCount}{" "}
@@ -563,12 +635,18 @@ export default function Checkout({
         </div>
       </section>
 
-      {paymentMessage && (
+      {/* Payment status */}
+      {(localPaymentMessage || paymentMessage) && (
         <div
           role="status"
-          className="rounded-xl border border-[#e4b441]/60 bg-white p-4 text-sm leading-6"
+          aria-live="polite"
+          className={`rounded-xl border p-4 text-sm leading-6 ${
+            paymentError
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-[#e4b441]/60 bg-white text-[#052a50]"
+          }`}
         >
-          {paymentMessage}
+          {localPaymentMessage || paymentMessage}
         </div>
       )}
 
@@ -578,9 +656,8 @@ export default function Checkout({
           <input
             type="checkbox"
             checked={acceptedTerms}
-            onChange={(event) =>
-              setAcceptedTerms(event.target.checked)
-            }
+            disabled={isPaying}
+            onChange={(event) => setAcceptedTerms(event.target.checked)}
             className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-[#052a50]"
           />
 
@@ -611,7 +688,8 @@ export default function Checkout({
         <button
           type="button"
           onClick={onBack}
-          className="flex-1 rounded-xl border border-[#052a50]/20 bg-white px-5 py-3.5 text-sm font-semibold text-[#052a50] transition hover:bg-[#052a50]/5"
+          disabled={isPaying}
+          className="flex-1 rounded-xl border border-[#052a50]/20 bg-white px-5 py-3.5 text-sm font-semibold text-[#052a50] transition hover:bg-[#052a50]/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Back
         </button>
@@ -619,16 +697,19 @@ export default function Checkout({
         <button
           type="button"
           onClick={handlePay}
-          disabled={!acceptedTerms || itemCount === 0}
+          disabled={!acceptedTerms || itemCount === 0 || isPaying}
+          aria-busy={isPaying}
           className={`flex-1 rounded-xl px-5 py-3.5 text-sm font-semibold transition ${
-            acceptedTerms && itemCount > 0
+            acceptedTerms && itemCount > 0 && !isPaying
               ? "bg-[#052a50] text-white hover:bg-[#e4b441] hover:text-[#052a50]"
               : "cursor-not-allowed bg-gray-300 text-gray-500"
           }`}
         >
-          {acceptedTerms
-            ? `Pay ${formatPrice(totalAmount)}`
-            : "Accept Terms to Pay"}
+          {isPaying
+            ? "Preparing Payment..."
+            : !acceptedTerms
+              ? "Accept Terms to Pay"
+              : `Pay ${formatPrice(totalAmount)}`}
         </button>
       </div>
     </div>
