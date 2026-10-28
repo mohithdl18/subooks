@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { getDb } from "@/lib/mongodb";
 
-export const runtime = "nodejs";
+// export const runtime = "nodejs";
 
 export async function POST(request) {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;

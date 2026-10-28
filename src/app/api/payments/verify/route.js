@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { ObjectId } from "mongodb";
 import { getDb, clientPromise } from "@/lib/mongodb";
 
-export const runtime = "nodejs";
+// export const runtime = "nodejs";
 const fail = (message, status = 400, extra = {}) => NextResponse.json({ success: false, message, ...extra }, { status });
 
 function sameHex(a, b) {

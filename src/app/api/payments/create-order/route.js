@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { getDb } from "@/lib/mongodb";
 import rooms from "@/data/rooms.json";
 
-export const runtime = "nodejs";
+// export const runtime = "nodejs";
 
 // Server-authoritative rates (INR/night); keep synchronized with the approved price list.
 const ROOM_RATES = { Room1: 6500, Room2: 7000, Room3: 5500, Room4: 6000 };
